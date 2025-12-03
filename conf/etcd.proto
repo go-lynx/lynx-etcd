@@ -1,0 +1,102 @@
+syntax = "proto3";
+
+package lynx.protobuf.plugin.etcd;
+
+option go_package = "github.com/go-lynx/lynx/plugins/etcd/conf;conf";
+
+import "google/protobuf/duration.proto";
+
+// Etcd message defines configuration information for etcd configuration center.
+// Etcd is a distributed key-value store. This message is used to configure parameters required for interacting with etcd.
+message Etcd {
+  // endpoints is the list of etcd server endpoints.
+  // Multiple endpoints can be specified for high availability.
+  repeated string endpoints = 1;
+  
+  // timeout is the timeout period for interacting with etcd services.
+  // If no response is received within this time after sending a request, the request is considered timed out.
+  google.protobuf.Duration timeout = 2;
+  
+  // dial_timeout is the timeout for establishing connections to etcd.
+  google.protobuf.Duration dial_timeout = 3;
+  
+  // username is the username for etcd authentication.
+  string username = 4;
+  
+  // password is the password for etcd authentication.
+  string password = 5;
+  
+  // namespace is the namespace prefix for configuration keys.
+  // All configuration keys will be prefixed with this namespace.
+  string namespace = 6;
+  
+  // enable_tls whether to enable TLS encryption.
+  bool enable_tls = 7;
+  
+  // cert_file is the path to the client certificate file.
+  string cert_file = 8;
+  
+  // key_file is the path to the client private key file.
+  string key_file = 9;
+  
+  // ca_file is the path to the CA certificate file.
+  string ca_file = 10;
+  
+  // enable_cache whether to enable local cache.
+  // When enabled, configurations will be cached locally to reduce network requests.
+  bool enable_cache = 11;
+  
+  // enable_metrics whether to enable monitoring metrics.
+  // When enabled, it will collect and report various monitoring metrics.
+  bool enable_metrics = 12;
+  
+  // enable_retry whether to enable retry mechanism.
+  // When enabled, it will automatically retry when connection fails.
+  bool enable_retry = 13;
+  
+  // max_retry_times maximum number of retries.
+  int32 max_retry_times = 14;
+  
+  // retry_interval retry interval time.
+  google.protobuf.Duration retry_interval = 15;
+  
+  // enable_graceful_shutdown whether to enable graceful shutdown.
+  // When enabled, it will gracefully close connections during shutdown.
+  bool enable_graceful_shutdown = 16;
+  
+  // shutdown_timeout graceful shutdown timeout.
+  google.protobuf.Duration shutdown_timeout = 17;
+  
+  // enable_logging whether to enable detailed logging.
+  // When enabled, it will output detailed debug logs.
+  bool enable_logging = 18;
+  
+  // log_level log level.
+  // Supported levels: debug, info, warn, error
+  string log_level = 19;
+  
+  // service_config configuration for remote service configuration loading
+  ServiceConfig service_config = 20;
+}
+
+// ServiceConfig defines configuration for loading remote service configurations
+message ServiceConfig {
+  // prefix is the configuration key prefix in etcd
+  // If empty, uses the main etcd namespace
+  string prefix = 1;
+  
+  // additional_prefixes defines additional prefixes to load
+  // Each entry specifies a separate prefix to load
+  repeated string additional_prefixes = 2;
+  
+  // priority defines the merge priority (higher number = higher priority)
+  // Default is 0, higher priority configs will override lower priority ones
+  int32 priority = 3;
+  
+  // merge_strategy defines how to handle conflicts with existing configs
+  // "override" (default): later configs override earlier ones
+  // "merge": merge nested objects, override leaf values
+  // "append": append to arrays, override other values
+  string merge_strategy = 4;
+}
+

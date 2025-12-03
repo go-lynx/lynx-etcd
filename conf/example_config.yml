@@ -1,0 +1,76 @@
+# Etcd 配置中心插件配置示例
+
+lynx:
+  etcd:
+    # etcd 服务器端点列表（支持多个端点实现高可用）
+    endpoints:
+      - "127.0.0.1:2379"
+      - "127.0.0.1:2380"
+      - "127.0.0.1:2381"
+    
+    # 操作超时时间
+    timeout: 10s
+    
+    # 连接建立超时时间
+    dial_timeout: 5s
+    
+    # 用户名（可选）
+    username: ""
+    
+    # 密码（可选）
+    password: ""
+    
+    # 配置键前缀命名空间
+    namespace: "lynx/config"
+    
+    # 是否启用 TLS 加密
+    enable_tls: false
+    
+    # TLS 证书文件路径（启用 TLS 时使用）
+    cert_file: ""
+    key_file: ""
+    ca_file: ""
+    
+    # 是否启用本地缓存
+    enable_cache: true
+    
+    # 是否启用指标监控
+    enable_metrics: true
+    
+    # 是否启用重试机制
+    enable_retry: true
+    
+    # 最大重试次数
+    max_retry_times: 3
+    
+    # 重试间隔
+    retry_interval: 1s
+    
+    # 是否启用优雅关闭
+    enable_graceful_shutdown: true
+    
+    # 优雅关闭超时时间
+    shutdown_timeout: 10s
+    
+    # 是否启用详细日志
+    enable_logging: true
+    
+    # 日志级别: debug, info, warn, error
+    log_level: "info"
+    
+    # 服务配置（多配置源支持）
+    service_config:
+      # 主配置前缀
+      prefix: "lynx/config"
+      
+      # 附加配置前缀列表
+      additional_prefixes:
+        - "lynx/config/app"
+        - "lynx/config/db"
+      
+      # 合并优先级（数字越大优先级越高）
+      priority: 0
+      
+      # 合并策略: override, merge, append
+      merge_strategy: "override"
+
