@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/go-lynx/lynx/app/log"
+	"github.com/go-lynx/lynx/log"
 )
 
 // CleanupTasks implements custom cleanup logic for the Etcd plugin.
@@ -38,7 +38,7 @@ func (p *PlugEtcd) CleanupTasks() error {
 			log.Debugf("Stopped config watcher for namespace: %s", namespace)
 		}
 	}
-	p.configWatchers = make(map[string]*ConfigWatcher)
+	p.configWatchers = make(map[string]*EtcdConfigWatcher)
 	p.watcherMutex.Unlock()
 
 	// Close etcd client

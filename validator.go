@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-lynx/lynx/plugins/etcd/conf"
+	"github.com/go-lynx/lynx-etcd/conf"
 )
 
 // ValidationError configuration validation error

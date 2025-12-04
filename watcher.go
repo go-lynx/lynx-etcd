@@ -3,12 +3,11 @@ package etcd
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/go-kratos/kratos/v2/config"
-	"github.com/go-lynx/lynx/app/log"
+	"github.com/go-lynx/lynx/log"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 

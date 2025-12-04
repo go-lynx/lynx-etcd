@@ -12,8 +12,8 @@ import (
 	"github.com/go-kratos/kratos/v2/middleware"
 	"github.com/go-kratos/kratos/v2/registry"
 	"github.com/go-kratos/kratos/v2/selector"
-	"github.com/go-lynx/lynx/app/log"
-	"github.com/go-lynx/lynx/plugins/etcd/conf"
+	"github.com/go-lynx/lynx-etcd/conf"
+	"github.com/go-lynx/lynx/log"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 

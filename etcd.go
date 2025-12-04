@@ -7,10 +7,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/go-lynx/lynx/app"
-	"github.com/go-lynx/lynx/app/log"
+	"github.com/go-lynx/lynx"
+	"github.com/go-lynx/lynx-etcd/conf"
+	"github.com/go-lynx/lynx/log"
 	"github.com/go-lynx/lynx/plugins"
-	"github.com/go-lynx/lynx/plugins/etcd/conf"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
@@ -51,7 +51,7 @@ type PlugEtcd struct {
 	healthCheckCloseOnce sync.Once // Protect against multiple close operations
 
 	// Configuration watchers
-	configWatchers map[string]*ConfigWatcher
+	configWatchers map[string]*EtcdConfigWatcher
 	watcherMutex   sync.RWMutex // Watcher mutex
 
 	// Cache system
@@ -78,7 +78,7 @@ func NewEtcdConfigCenter() *PlugEtcd {
 			math.MaxInt,
 		),
 		healthCheckCh:  make(chan struct{}),
-		configWatchers: make(map[string]*ConfigWatcher),
+		configWatchers: make(map[string]*EtcdConfigWatcher),
 		configCache:    make(map[string]interface{}),
 	}
 }
@@ -230,7 +230,7 @@ func (p *PlugEtcd) StartupTasks() error {
 	p.client = client
 
 	// Set the Etcd configuration center as the Lynx application's control plane.
-	err = app.Lynx().SetControlPlane(p)
+	err = lynx.Lynx().SetControlPlane(p)
 	if err != nil {
 		log.Errorf("Failed to set control plane: %v", err)
 		if p.metrics != nil {
@@ -240,7 +240,7 @@ func (p *PlugEtcd) StartupTasks() error {
 	}
 
 	// Get the Lynx application's control plane startup configuration.
-	cfg, err := app.Lynx().InitControlPlaneConfig()
+	cfg, err := lynx.Lynx().InitControlPlaneConfig()
 	if err != nil {
 		log.Errorf("Failed to init control plane config: %v", err)
 		if p.metrics != nil {
@@ -250,7 +250,7 @@ func (p *PlugEtcd) StartupTasks() error {
 	}
 
 	// Load plugins from the plugin list.
-	app.Lynx().GetPluginManager().LoadPlugins(cfg)
+	lynx.Lynx().GetPluginManager().LoadPlugins(cfg)
 
 	p.setInitialized()
 	log.Infof("Etcd plugin initialized successfully")
@@ -263,12 +263,7 @@ func (p *PlugEtcd) initEtcdClient() (*clientv3.Client, error) {
 		return nil, fmt.Errorf("etcd endpoints are required")
 	}
 
-	// Get timeout
-	timeout := conf.DefaultTimeout
-	if p.conf.Timeout != nil {
-		timeout = p.conf.Timeout.AsDuration()
-	}
-
+	// Get dial timeout
 	dialTimeout := conf.DefaultDialTimeout
 	if p.conf.DialTimeout != nil {
 		dialTimeout = p.conf.DialTimeout.AsDuration()

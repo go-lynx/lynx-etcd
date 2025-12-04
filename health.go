@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-lynx/lynx/app/log"
-	"github.com/go-lynx/lynx/plugins/etcd/conf"
+	"github.com/go-lynx/lynx-etcd/conf"
+	"github.com/go-lynx/lynx/log"
 )
 
 // CheckHealth performs a health check.
