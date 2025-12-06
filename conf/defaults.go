@@ -15,6 +15,12 @@ const (
 
 	// DefaultDialTimeout is the default timeout for establishing connections
 	DefaultDialTimeout = 5 * time.Second
+
+	// DefaultRegistryNamespace is the default namespace for service registry
+	DefaultRegistryNamespace = "lynx/services"
+
+	// DefaultTTL is the default TTL for service registration
+	DefaultTTL = 30 * time.Second
 )
 
 // GetDefaultTimeout returns the default timeout duration

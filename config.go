@@ -32,17 +32,64 @@ func (p *PlugEtcd) GRPCRateLimit() middleware.Middleware {
 }
 
 // NewServiceRegistry implements the ServiceRegistry interface for service registration
-// Etcd is a configuration center, not a service registry, so this returns nil
 func (p *PlugEtcd) NewServiceRegistry() registry.Registrar {
-	log.Debugf("Etcd plugin does not support service registration, returning nil")
-	return nil
+	if err := p.checkInitialized(); err != nil {
+		log.Warnf("Etcd plugin not initialized, returning nil registrar: %v", err)
+		return nil
+	}
+
+	if !p.conf.EnableRegister {
+		log.Debugf("Service registration is disabled in etcd configuration")
+		return nil
+	}
+
+	if p.client == nil {
+		log.Errorf("Etcd client is nil")
+		return nil
+	}
+
+	// Get registry namespace
+	registryNamespace := p.conf.RegistryNamespace
+	if registryNamespace == "" {
+		registryNamespace = conf.DefaultRegistryNamespace
+	}
+
+	// Get TTL
+	ttl := conf.DefaultTTL
+	if p.conf.Ttl != nil {
+		ttl = p.conf.Ttl.AsDuration()
+		if ttl <= 0 {
+			ttl = conf.DefaultTTL
+		}
+	}
+
+	return NewEtcdRegistrar(p.client, registryNamespace, ttl)
 }
 
 // NewServiceDiscovery implements the ServiceRegistry interface for service discovery
-// Etcd is a configuration center, not a service discovery service, so this returns nil
 func (p *PlugEtcd) NewServiceDiscovery() registry.Discovery {
-	log.Debugf("Etcd plugin does not support service discovery, returning nil")
-	return nil
+	if err := p.checkInitialized(); err != nil {
+		log.Warnf("Etcd plugin not initialized, returning nil discovery: %v", err)
+		return nil
+	}
+
+	if !p.conf.EnableDiscovery {
+		log.Debugf("Service discovery is disabled in etcd configuration")
+		return nil
+	}
+
+	if p.client == nil {
+		log.Errorf("Etcd client is nil")
+		return nil
+	}
+
+	// Get registry namespace
+	registryNamespace := p.conf.RegistryNamespace
+	if registryNamespace == "" {
+		registryNamespace = conf.DefaultRegistryNamespace
+	}
+
+	return NewEtcdDiscovery(p.client, registryNamespace)
 }
 
 // NewNodeRouter implements the RouteManager interface for service routing

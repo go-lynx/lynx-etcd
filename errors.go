@@ -49,6 +49,15 @@ const (
 	// ErrCodeShutdownFailed Graceful shutdown related errors
 	ErrCodeShutdownFailed  ErrorCode = "SHUTDOWN_FAILED"
 	ErrCodeShutdownTimeout ErrorCode = "SHUTDOWN_TIMEOUT"
+
+	// ErrCodeRegisterFailed Service registration related errors
+	ErrCodeRegisterFailed ErrorCode = "REGISTER_FAILED"
+
+	// ErrCodeDeregisterFailed Service deregistration related errors
+	ErrCodeDeregisterFailed ErrorCode = "DEREGISTER_FAILED"
+
+	// ErrCodeDiscoveryFailed Service discovery related errors
+	ErrCodeDiscoveryFailed ErrorCode = "DISCOVERY_FAILED"
 )
 
 // EtcdError Etcd plugin error

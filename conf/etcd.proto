@@ -77,6 +77,23 @@ message Etcd {
   
   // service_config configuration for remote service configuration loading
   ServiceConfig service_config = 20;
+  
+  // enable_register whether to enable service registration.
+  // When enabled, services can be registered to etcd.
+  bool enable_register = 21;
+  
+  // enable_discovery whether to enable service discovery.
+  // When enabled, services can be discovered from etcd.
+  bool enable_discovery = 22;
+  
+  // registry_namespace is the namespace prefix for service registry keys.
+  // All service registry keys will be prefixed with this namespace.
+  // Default is "lynx/services"
+  string registry_namespace = 23;
+  
+  // ttl is the time-to-live for service registration in etcd.
+  // Services will be automatically deregistered after this time if not renewed.
+  google.protobuf.Duration ttl = 24;
 }
 
 // ServiceConfig defines configuration for loading remote service configurations
