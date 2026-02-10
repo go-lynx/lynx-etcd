@@ -42,7 +42,7 @@ func NewEtcdRegistrar(client *clientv3.Client, namespace string, ttl time.Durati
 		client:      client,
 		namespace:   namespace,
 		ttl:         ttl,
-		registered:  make(map[string]*registry.ServiceInstance),
+		registered:  make(map[string]*ServiceLease),
 		leaseCtx:    ctx,
 		leaseCancel: cancel,
 	}
