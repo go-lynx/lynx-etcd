@@ -236,6 +236,9 @@ func (p *PlugEtcd) StartupTasks() error {
 		if err := p.rt.RegisterSharedResource(pluginName, p); err != nil {
 			return fmt.Errorf("failed to register etcd runtime resource: %w", err)
 		}
+		if err := p.rt.RegisterPrivateResource("client", p.client); err != nil {
+			log.Warnf("failed to register etcd private client resource: %v", err)
+		}
 	}
 
 	// Set the Etcd configuration center as the Lynx application's control plane.
