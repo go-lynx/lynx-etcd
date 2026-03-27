@@ -34,6 +34,7 @@ const (
 type PlugEtcd struct {
 	*plugins.BasePlugin
 	conf *conf.Etcd
+	rt   plugins.Runtime
 
 	// Etcd client
 	client *clientv3.Client
@@ -86,6 +87,7 @@ func NewEtcdConfigCenter() *PlugEtcd {
 // InitializeResources implements custom initialization logic for the Etcd plugin.
 // This function loads and validates Etcd configuration, using default configuration if none is provided.
 func (p *PlugEtcd) InitializeResources(rt plugins.Runtime) error {
+	p.rt = rt
 	// Initialize an empty configuration structure
 	p.conf = &conf.Etcd{}
 
@@ -228,6 +230,13 @@ func (p *PlugEtcd) StartupTasks() error {
 
 	// Save client instance
 	p.client = client
+
+	// Publish the started plugin instance so dependent plugins can safely obtain the live client.
+	if p.rt != nil {
+		if err := p.rt.RegisterSharedResource(pluginName, p); err != nil {
+			return fmt.Errorf("failed to register etcd runtime resource: %w", err)
+		}
+	}
 
 	// Set the Etcd configuration center as the Lynx application's control plane.
 	err = lynx.Lynx().SetControlPlane(p)
