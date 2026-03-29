@@ -21,7 +21,7 @@ const (
 	pluginName = "etcd.config.center"
 
 	// pluginVersion represents the current version of the Etcd configuration center plugin.
-	pluginVersion = "v1.5.5"
+	pluginVersion = "v1.6.0-beta"
 
 	// pluginDescription briefly describes the functionality of the Etcd configuration center plugin.
 	pluginDescription = "etcd configuration center plugin for lynx framework"
