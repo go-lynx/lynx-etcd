@@ -7,7 +7,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/go-lynx/lynx"
 	"github.com/go-lynx/lynx-etcd/conf"
 	"github.com/go-lynx/lynx/log"
 	"github.com/go-lynx/lynx/plugins"
@@ -21,7 +20,7 @@ const (
 	pluginName = "etcd.config.center"
 
 	// pluginVersion represents the current version of the Etcd configuration center plugin.
-	pluginVersion = "v1.6.0-beta"
+	pluginVersion = "v1.5.5"
 
 	// pluginDescription briefly describes the functionality of the Etcd configuration center plugin.
 	pluginDescription = "etcd configuration center plugin for lynx framework"
@@ -56,8 +55,8 @@ type PlugEtcd struct {
 	watcherMutex   sync.RWMutex // Watcher mutex
 
 	// Cache system
-	configCache map[string]interface{} // Configuration cache
-	cacheMutex  sync.RWMutex           // Cache mutex
+	configCache map[string]any // Configuration cache
+	cacheMutex  sync.RWMutex   // Cache mutex
 }
 
 // NewEtcdConfigCenter creates a new Etcd configuration center.
@@ -80,7 +79,7 @@ func NewEtcdConfigCenter() *PlugEtcd {
 		),
 		healthCheckCh:  make(chan struct{}),
 		configWatchers: make(map[string]*EtcdConfigWatcher),
-		configCache:    make(map[string]interface{}),
+		configCache:    make(map[string]any),
 	}
 }
 
@@ -198,75 +197,9 @@ func (p *PlugEtcd) setDestroyed() {
 // StartupTasks implements custom startup logic for the Etcd plugin.
 // This function configures and starts the Etcd configuration center, adding necessary middleware and configuration options.
 func (p *PlugEtcd) StartupTasks() error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if atomic.LoadInt32(&p.initialized) == 1 {
-		return NewInitError("Etcd plugin already initialized")
-	}
-
-	// Record startup operation metrics
-	if p.metrics != nil {
-		p.metrics.RecordClientOperation("startup", "start")
-		defer func() {
-			if p.metrics != nil {
-				p.metrics.RecordClientOperation("startup", "success")
-			}
-		}()
-	}
-
-	// Use Lynx application Helper to log Etcd plugin initialization information.
-	log.Infof("Initializing etcd plugin with endpoints: %v, namespace: %s", p.conf.Endpoints, p.conf.Namespace)
-
-	// Initialize Etcd client
-	client, err := p.initEtcdClient()
-	if err != nil {
-		log.Errorf("Failed to initialize Etcd client: %v", err)
-		if p.metrics != nil {
-			p.metrics.RecordClientOperation("startup", "error")
-		}
-		return WrapInitError(err, "failed to initialize Etcd client")
-	}
-
-	// Save client instance
-	p.client = client
-
-	// Publish the started plugin instance so dependent plugins can safely obtain the live client.
-	if p.rt != nil {
-		if err := p.rt.RegisterSharedResource(pluginName, p); err != nil {
-			return fmt.Errorf("failed to register etcd runtime resource: %w", err)
-		}
-		if err := p.rt.RegisterPrivateResource("client", p.client); err != nil {
-			log.Warnf("failed to register etcd private client resource: %v", err)
-		}
-	}
-
-	// Set the Etcd configuration center as the Lynx application's control plane.
-	err = lynx.Lynx().SetControlPlane(p)
-	if err != nil {
-		log.Errorf("Failed to set control plane: %v", err)
-		if p.metrics != nil {
-			p.metrics.RecordClientOperation("startup", "error")
-		}
-		return WrapInitError(err, "failed to set control plane")
-	}
-
-	// Get the Lynx application's control plane startup configuration.
-	cfg, err := lynx.Lynx().InitControlPlaneConfig()
-	if err != nil {
-		log.Errorf("Failed to init control plane config: %v", err)
-		if p.metrics != nil {
-			p.metrics.RecordClientOperation("startup", "error")
-		}
-		return WrapInitError(err, "failed to init control plane config")
-	}
-
-	// Load plugins from the plugin list.
-	lynx.Lynx().GetPluginManager().LoadPlugins(cfg)
-
-	p.setInitialized()
-	log.Infof("Etcd plugin initialized successfully")
-	return nil
+	ctx, cancel := p.startupContext()
+	defer cancel()
+	return p.startupTasksContext(ctx)
 }
 
 // initEtcdClient initializes Etcd client

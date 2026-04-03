@@ -6,8 +6,10 @@ option go_package = "github.com/go-lynx/lynx-etcd/conf;conf";
 
 import "google/protobuf/duration.proto";
 
-// Etcd message defines configuration information for etcd configuration center.
-// Etcd is a distributed key-value store. This message is used to configure parameters required for interacting with etcd.
+// Etcd message defines configuration information for the etcd configuration center.
+// Runtime behavior is documented in README.md and VALIDATION.md.
+// A few fields remain in the schema for compatibility, but are not treated as active
+// runtime switches by the current plugin implementation.
 message Etcd {
   // endpoints is the list of etcd server endpoints.
   // Multiple endpoints can be specified for high availability.
@@ -60,19 +62,20 @@ message Etcd {
   // retry_interval retry interval time.
   google.protobuf.Duration retry_interval = 15;
   
-  // enable_graceful_shutdown whether to enable graceful shutdown.
-  // When enabled, it will gracefully close connections during shutdown.
+  // enable_graceful_shutdown is kept for schema compatibility.
+  // The current runtime always performs cleanup; shutdown_timeout is the field
+  // that actually affects cleanup timeout behavior.
   bool enable_graceful_shutdown = 16;
   
   // shutdown_timeout graceful shutdown timeout.
   google.protobuf.Duration shutdown_timeout = 17;
   
-  // enable_logging whether to enable detailed logging.
-  // When enabled, it will output detailed debug logs.
+  // enable_logging is kept for schema compatibility.
+  // The current runtime uses the shared Lynx logger and does not branch on this flag.
   bool enable_logging = 18;
   
-  // log_level log level.
-  // Supported levels: debug, info, warn, error
+  // log_level is kept for schema compatibility.
+  // The current runtime does not apply a per-plugin log level from this field.
   string log_level = 19;
   
   // service_config configuration for remote service configuration loading
@@ -106,16 +109,13 @@ message ServiceConfig {
   // Each entry specifies a separate prefix to load
   repeated string additional_prefixes = 2;
   
-  // priority defines the merge priority (higher number = higher priority)
-  // Default is 0, higher priority configs will override lower priority ones
+  // priority is reserved metadata for future or framework-level merge semantics.
+  // The current plugin loads additional prefixes in declaration order.
   int32 priority = 3;
   
-  // merge_strategy defines how to handle conflicts with existing configs
-  // "override" (default): later configs override earlier ones
-  // "merge": merge nested objects, override leaf values
-  // "append": append to arrays, override other values
+  // merge_strategy is reserved metadata for future or framework-level merge semantics.
+  // The current plugin does not apply a plugin-local custom merge algorithm.
   string merge_strategy = 4;
 }
-
 
 

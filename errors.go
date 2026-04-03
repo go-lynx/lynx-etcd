@@ -65,7 +65,7 @@ type EtcdError struct {
 	Code    ErrorCode
 	Message string
 	Cause   error
-	Context map[string]interface{}
+	Context map[string]any
 }
 
 // NewEtcdError creates new Etcd error
@@ -73,7 +73,7 @@ func NewEtcdError(code ErrorCode, message string) *EtcdError {
 	return &EtcdError{
 		Code:    code,
 		Message: message,
-		Context: make(map[string]interface{}),
+		Context: make(map[string]any),
 	}
 }
 
@@ -84,7 +84,7 @@ func (e *EtcdError) WithCause(cause error) *EtcdError {
 }
 
 // WithContext adds context information
-func (e *EtcdError) WithContext(key string, value interface{}) *EtcdError {
+func (e *EtcdError) WithContext(key string, value any) *EtcdError {
 	e.Context[key] = value
 	return e
 }

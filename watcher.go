@@ -4,20 +4,21 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
+	"sync"
 
 	"github.com/go-kratos/kratos/v2/config"
-	"github.com/go-lynx/lynx/log"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // EtcdConfigWatcher implements config.Watcher for etcd
 type EtcdConfigWatcher struct {
-	client  *clientv3.Client
-	prefix  string
-	watchCh clientv3.WatchChan
-	stopCh  chan struct{}
-	done    chan struct{}
+	client   *clientv3.Client
+	prefix   string
+	watchCh  clientv3.WatchChan
+	stopCh   chan struct{}
+	done     chan struct{}
+	stopOnce sync.Once
+	doneOnce sync.Once
 }
 
 // NewEtcdConfigWatcher creates a new etcd config watcher
@@ -80,14 +81,11 @@ func (w *EtcdConfigWatcher) Next() ([]*config.KeyValue, error) {
 
 // Stop stops the watcher
 func (w *EtcdConfigWatcher) Stop() error {
-	close(w.stopCh)
-
-	// Wait for done signal with timeout
-	select {
-	case <-w.done:
-	case <-time.After(5 * time.Second):
-		log.Warnf("Etcd watcher stop timeout")
-	}
-
+	w.stopOnce.Do(func() {
+		close(w.stopCh)
+	})
+	w.doneOnce.Do(func() {
+		close(w.done)
+	})
 	return nil
 }
