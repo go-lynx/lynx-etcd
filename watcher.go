@@ -12,37 +12,51 @@ import (
 
 // EtcdConfigWatcher implements config.Watcher for etcd
 type EtcdConfigWatcher struct {
-	client   *clientv3.Client
-	prefix   string
-	watchCh  clientv3.WatchChan
-	stopCh   chan struct{}
-	done     chan struct{}
-	stopOnce sync.Once
-	doneOnce sync.Once
+	client      *clientv3.Client
+	prefix      string
+	watchCh     clientv3.WatchChan
+	stopCh      chan struct{}
+	done        chan struct{}
+	watchCtx    context.Context
+	cancelWatch context.CancelFunc
+	stopOnce    sync.Once
+	doneOnce    sync.Once
 }
 
 // NewEtcdConfigWatcher creates a new etcd config watcher
 func NewEtcdConfigWatcher(client *clientv3.Client, prefix string) *EtcdConfigWatcher {
+	watchCtx, cancelWatch := context.WithCancel(context.Background())
 	return &EtcdConfigWatcher{
-		client: client,
-		prefix: prefix,
-		stopCh: make(chan struct{}),
-		done:   make(chan struct{}),
+		client:      client,
+		prefix:      prefix,
+		stopCh:      make(chan struct{}),
+		done:        make(chan struct{}),
+		watchCtx:    watchCtx,
+		cancelWatch: cancelWatch,
 	}
 }
 
 // Next returns the next set of configuration changes
 func (w *EtcdConfigWatcher) Next() ([]*config.KeyValue, error) {
 	if w.watchCh == nil {
+		if err := w.watchCtx.Err(); err != nil {
+			return nil, fmt.Errorf("watcher stopped")
+		}
 		// Start watching
-		w.watchCh = w.client.Watch(context.Background(), w.prefix, clientv3.WithPrefix())
+		w.watchCh = w.client.Watch(w.watchCtx, w.prefix, clientv3.WithPrefix())
 	}
 
 	for {
 		select {
 		case <-w.stopCh:
 			return nil, fmt.Errorf("watcher stopped")
-		case resp := <-w.watchCh:
+		case resp, ok := <-w.watchCh:
+			if !ok {
+				if w.watchCtx.Err() != nil {
+					return nil, fmt.Errorf("watcher stopped")
+				}
+				return nil, fmt.Errorf("watch channel closed")
+			}
 			if resp.Err() != nil {
 				return nil, fmt.Errorf("watch error: %w", resp.Err())
 			}
@@ -82,6 +96,9 @@ func (w *EtcdConfigWatcher) Next() ([]*config.KeyValue, error) {
 // Stop stops the watcher
 func (w *EtcdConfigWatcher) Stop() error {
 	w.stopOnce.Do(func() {
+		if w.cancelWatch != nil {
+			w.cancelWatch()
+		}
 		close(w.stopCh)
 	})
 	w.doneOnce.Do(func() {
