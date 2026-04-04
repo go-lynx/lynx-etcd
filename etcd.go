@@ -189,6 +189,10 @@ func (p *PlugEtcd) setInitialized() {
 	atomic.StoreInt32(&p.initialized, 1)
 }
 
+func (p *PlugEtcd) clearInitialized() {
+	atomic.StoreInt32(&p.initialized, 0)
+}
+
 // setDestroyed atomically sets destruction status
 func (p *PlugEtcd) setDestroyed() {
 	atomic.StoreInt32(&p.destroyed, 1)

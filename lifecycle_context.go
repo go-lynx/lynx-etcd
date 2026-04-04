@@ -157,18 +157,13 @@ func (p *PlugEtcd) startupTasksContext(ctx context.Context) (startErr error) {
 		return WrapInitError(err, "etcd endpoints are unreachable during startup")
 	}
 	log.Infof("Etcd connectivity verified")
+	p.setInitialized()
 
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("etcd startup canceled before publishing runtime resources: %w", err)
-	}
-	if p.rt != nil {
-		if err := p.rt.RegisterSharedResource(pluginName, p); err != nil {
-			return fmt.Errorf("failed to register etcd runtime resource: %w", err)
+	defer func() {
+		if startErr != nil {
+			p.clearInitialized()
 		}
-		if err := p.rt.RegisterPrivateResource("client", p.client); err != nil {
-			log.Warnf("failed to register etcd private client resource: %v", err)
-		}
-	}
+	}()
 
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("etcd startup canceled before setting control plane: %w", err)
@@ -188,11 +183,42 @@ func (p *PlugEtcd) startupTasksContext(ctx context.Context) (startErr error) {
 	}
 
 	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("etcd startup canceled before publishing runtime resources: %w", err)
+	}
+	if p.rt != nil {
+		if err := lynx.RegisterControlPlaneCapabilityResources(p.rt, pluginName, p); err != nil {
+			return fmt.Errorf("failed to register etcd runtime capability resources: %w", err)
+		}
+		if err := p.rt.RegisterPrivateResource("client", p.client); err != nil {
+			log.Warnf("failed to register etcd private client resource: %v", err)
+		}
+		if err := p.rt.RegisterPrivateResource("etcd_client", p.client); err != nil {
+			log.Warnf("failed to register etcd private sdk client resource: %v", err)
+		}
+		if p.conf.EnableRegister {
+			if registrar := p.NewServiceRegistry(); registrar != nil {
+				if err := p.rt.RegisterSharedResource(pluginName+".service_registry", registrar); err != nil {
+					log.Warnf("failed to register etcd service registry resource: %v", err)
+				}
+			}
+		}
+		if p.conf.EnableDiscovery {
+			if discovery := p.NewServiceDiscovery(); discovery != nil {
+				if err := p.rt.RegisterSharedResource(pluginName+".service_discovery", discovery); err != nil {
+					log.Warnf("failed to register etcd service discovery resource: %v", err)
+				}
+			}
+		}
+	}
+
+	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("etcd startup canceled before loading dependent plugins: %w", err)
 	}
-	lynx.Lynx().GetPluginManager().LoadPlugins(cfg)
+	if err := lynx.Lynx().GetPluginManager().LoadPlugins(cfg); err != nil {
+		log.Errorf("Failed to load dependent plugins from Etcd control plane config: %v", err)
+		return WrapInitError(err, "failed to load dependent plugins")
+	}
 
-	p.setInitialized()
 	log.Infof("Etcd plugin initialized successfully")
 	return nil
 }

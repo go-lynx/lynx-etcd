@@ -12,6 +12,7 @@ import (
 	"github.com/go-kratos/kratos/v2/middleware"
 	"github.com/go-kratos/kratos/v2/registry"
 	"github.com/go-kratos/kratos/v2/selector"
+	"github.com/go-lynx/lynx"
 	"github.com/go-lynx/lynx-etcd/conf"
 	"github.com/go-lynx/lynx/log"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -148,6 +149,78 @@ func (p *PlugEtcd) GetConfigSources() ([]config.Source, error) {
 	return sources, nil
 }
 
+// GetConfigWatchTargets returns the etcd prefixes that should feed the global config snapshot.
+func (p *PlugEtcd) GetConfigWatchTargets(appName string) ([]lynx.ControlPlaneConfigTarget, error) {
+	if err := p.checkInitialized(); err != nil {
+		return nil, err
+	}
+
+	mainPrefix := p.conf.Namespace
+	mainPriority := 0
+	mainStrategy := ""
+	if p.conf.ServiceConfig != nil {
+		if p.conf.ServiceConfig.Prefix != "" {
+			mainPrefix = p.conf.ServiceConfig.Prefix
+		}
+		mainPriority = int(p.conf.ServiceConfig.Priority)
+		mainStrategy = p.conf.ServiceConfig.MergeStrategy
+	}
+	if mainPrefix == "" {
+		mainPrefix = conf.DefaultNamespace
+	}
+
+	targets := []lynx.ControlPlaneConfigTarget{{
+		FileName:      mainPrefix,
+		Priority:      mainPriority,
+		MergeStrategy: mainStrategy,
+	}}
+	if p.conf.ServiceConfig == nil {
+		return targets, nil
+	}
+
+	for _, prefix := range p.conf.ServiceConfig.AdditionalPrefixes {
+		if prefix == "" {
+			prefix = p.conf.ServiceConfig.Prefix
+		}
+		if prefix == "" {
+			prefix = p.conf.Namespace
+		}
+		if prefix == "" {
+			continue
+		}
+		targets = append(targets, lynx.ControlPlaneConfigTarget{
+			FileName:      prefix,
+			Priority:      int(p.conf.ServiceConfig.Priority),
+			MergeStrategy: p.conf.ServiceConfig.MergeStrategy,
+		})
+	}
+
+	return targets, nil
+}
+
+// WatchControlPlaneConfig opens a running watcher for an etcd-backed config target.
+func (p *PlugEtcd) WatchControlPlaneConfig(ctx context.Context, target lynx.ControlPlaneConfigTarget) (config.Watcher, error) {
+	source, err := p.GetConfig(target.FileName, target.Group)
+	if err != nil {
+		return nil, err
+	}
+	if source == nil {
+		return nil, fmt.Errorf("etcd config source is nil for prefix %s", target.FileName)
+	}
+	if _, err := source.Load(); err != nil {
+		return nil, fmt.Errorf("failed to prime etcd config source %s: %w", target.FileName, err)
+	}
+	watcher, err := source.Watch()
+	if err != nil {
+		return nil, err
+	}
+	if err := lynx.StartControlPlaneWatcher(ctx, watcher); err != nil {
+		_ = watcher.Stop()
+		return nil, err
+	}
+	return watcher, nil
+}
+
 // getMainConfigSource gets the main configuration source based on service_config
 func (p *PlugEtcd) getMainConfigSource() (config.Source, error) {
 	if p.conf.ServiceConfig == nil {
@@ -268,6 +341,21 @@ func (p *PlugEtcd) GetConfigValue(prefix, key string) (string, error) {
 
 	log.Infof("Successfully got config value - Prefix: [%s], Key: [%s]", prefix, key)
 	return value, nil
+}
+
+// ControlPlaneCapabilities declares Etcd's explicit control plane contract.
+func (p *PlugEtcd) ControlPlaneCapabilities() []lynx.ControlPlaneCapability {
+	capabilities := []lynx.ControlPlaneCapability{
+		lynx.ControlPlaneCapabilityConfig,
+		lynx.ControlPlaneCapabilityWatcher,
+	}
+	if p.conf != nil && p.conf.EnableRegister {
+		capabilities = append(capabilities, lynx.ControlPlaneCapabilityRegistry)
+	}
+	if p.conf != nil && p.conf.EnableDiscovery {
+		capabilities = append(capabilities, lynx.ControlPlaneCapabilityDiscovery)
+	}
+	return capabilities
 }
 
 // getConfigValueFromEtcd gets configuration value from etcd client
