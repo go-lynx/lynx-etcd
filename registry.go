@@ -344,7 +344,14 @@ func (w *EtcdWatcher) Start(ctx context.Context) error {
 	w.watchCh = w.client.Watch(ctx, w.servicePrefix, clientv3.WithPrefix())
 
 	// Start background goroutine to handle watch events
-	go w.handleWatchEvents(ctx)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Errorf("etcd watcher handleWatchEvents panic for %s: %v", w.serviceName, r)
+			}
+		}()
+		w.handleWatchEvents(ctx)
+	}()
 
 	// Start background goroutine to handle context cancellation
 	go func() {
