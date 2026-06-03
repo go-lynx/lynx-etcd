@@ -53,9 +53,8 @@ type PlugEtcd struct {
 	healthCheckCh        chan struct{}
 	healthCheckCloseOnce sync.Once // Protect against multiple close operations
 
-	// Configuration watchers
+	// Configuration watchers — always accessed under mu.
 	configWatchers map[string]*EtcdConfigWatcher
-	watcherMutex   sync.RWMutex // Watcher mutex
 
 	// Cache system
 	configCache map[string]any // Configuration cache

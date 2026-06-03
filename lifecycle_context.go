@@ -357,7 +357,8 @@ func (p *PlugEtcd) cleanupTasksContext(ctx context.Context) error {
 	log.Infof("Cleaning up etcd plugin")
 	var errs []error
 
-	p.watcherMutex.Lock()
+	// mu is already held; stop watchers directly without acquiring watcherMutex to
+	// avoid nested-lock ordering issues (cleanupTasksContext always runs under mu).
 	for namespace, watcher := range p.configWatchers {
 		if watcher == nil {
 			continue
@@ -370,7 +371,6 @@ func (p *PlugEtcd) cleanupTasksContext(ctx context.Context) error {
 		log.Debugf("Stopped config watcher for namespace: %s", namespace)
 	}
 	p.configWatchers = make(map[string]*EtcdConfigWatcher)
-	p.watcherMutex.Unlock()
 
 	if p.client != nil {
 		if err := p.client.Close(); err != nil {

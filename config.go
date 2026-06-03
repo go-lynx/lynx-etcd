@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -279,11 +278,6 @@ func (p *PlugEtcd) getAdditionalConfigSources() ([]config.Source, error) {
 
 		sources = append(sources, source)
 	}
-
-	// Sort by priority if needed (for now, just append in order)
-	sort.Slice(sources, func(i, j int) bool {
-		return false
-	})
 
 	return sources, nil
 }

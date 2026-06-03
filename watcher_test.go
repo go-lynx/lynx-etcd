@@ -9,6 +9,69 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
+// ── watcher reconnect test ────────────────────────────────────────────────────
+
+// TestEtcdConfigWatcherReconnectsOnChannelClose verifies that Next() transparently
+// loops when the watch channel is closed by the server (e.g., after an etcd
+// compaction or a transient network partition) and eventually returns data once
+// the channel is replenished — instead of surfacing an error to the caller.
+//
+// Implementation note: EtcdConfigWatcher.openWatchChan() is a no-op when
+// client is nil, so the test drives reconnection by swapping watchCh from a
+// separate goroutine while Next() is spinning on the closed channel.
+func TestEtcdConfigWatcherReconnectsOnChannelClose(t *testing.T) {
+	watcher := NewEtcdConfigWatcher(nil, "/lynx/config")
+
+	// First channel: closed immediately to simulate a server-side close.
+	firstCh := make(chan clientv3.WatchResponse)
+	close(firstCh)
+	watcher.watchCh = firstCh
+
+	// Second channel: delivers a real PUT event so Next() can return.
+	secondCh := make(chan clientv3.WatchResponse, 1)
+	secondCh <- clientv3.WatchResponse{
+		Events: []*clientv3.Event{
+			{
+				Type: clientv3.EventTypePut,
+				Kv: &mvccpb.KeyValue{
+					Key:   []byte("/lynx/config/reconnect"),
+					Value: []byte("ok"),
+				},
+			},
+		},
+	}
+
+	// After a short delay swap the channel so Next() picks up the real event.
+	// Next() loops on the closed channel (openWatchChan is a no-op for nil client)
+	// until watchCh is replaced here.
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		watcher.watchCh = secondCh
+	}()
+
+	resultCh := make(chan error, 1)
+	var gotKey string
+	go func() {
+		kvs, err := watcher.Next()
+		if err == nil && len(kvs) == 1 {
+			gotKey = kvs[0].Key
+		}
+		resultCh <- err
+	}()
+
+	select {
+	case err := <-resultCh:
+		if err != nil {
+			t.Fatalf("Next() should not error after reconnect, got: %v", err)
+		}
+		if gotKey != "reconnect" {
+			t.Fatalf("unexpected key after reconnect: %s", gotKey)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Next() did not return after channel swap")
+	}
+}
+
 func TestEtcdConfigWatcherStopCancelsWatchContext(t *testing.T) {
 	watcher := NewEtcdConfigWatcher(nil, "/lynx/config")
 
