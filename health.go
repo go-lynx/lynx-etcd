@@ -17,20 +17,6 @@ func (p *PlugEtcd) CheckHealth() error {
 	return p.checkEtcdHealthContext(ctx)
 }
 
-// checkEtcdHealth checks the health of the etcd configuration center.
-func (p *PlugEtcd) checkEtcdHealth() error {
-	ctx, cancel := p.startupContext()
-	defer cancel()
-	return p.checkEtcdHealthContext(ctx)
-}
-
-// checkClientConnection verifies client connection status.
-func (p *PlugEtcd) checkClientConnection() error {
-	ctx, cancel := p.startupContext()
-	defer cancel()
-	return p.checkClientConnectionContext(ctx)
-}
-
 // checkConfigManagementHealth checks configuration management functionality.
 func (p *PlugEtcd) checkConfigManagementHealth() error {
 	// Check status of components related to configuration management

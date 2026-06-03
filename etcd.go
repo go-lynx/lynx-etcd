@@ -1,14 +1,17 @@
+// Package etcd provides an etcd configuration-centre plugin for the Lynx framework.
+// It connects to an etcd cluster, watches configuration key prefixes for live changes,
+// and exposes those values to other plugins through the Lynx runtime resource registry.
+// Enhanced components include a circuit breaker, a configurable retry manager, and
+// Prometheus metrics covering client operations, config changes, and cache hit rates.
 package etcd
 
 import (
-	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/go-lynx/lynx-etcd/conf"
-	"github.com/go-lynx/lynx/log"
 	"github.com/go-lynx/lynx/plugins"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
@@ -204,47 +207,6 @@ func (p *PlugEtcd) StartupTasks() error {
 	ctx, cancel := p.startupContext()
 	defer cancel()
 	return p.startupTasksContext(ctx)
-}
-
-// initEtcdClient initializes Etcd client
-func (p *PlugEtcd) initEtcdClient() (*clientv3.Client, error) {
-	if len(p.conf.Endpoints) == 0 {
-		return nil, fmt.Errorf("etcd endpoints are required")
-	}
-
-	// Get dial timeout
-	dialTimeout := conf.DefaultDialTimeout
-	if p.conf.DialTimeout != nil {
-		dialTimeout = p.conf.DialTimeout.AsDuration()
-	}
-
-	// Build client configuration
-	cfg := clientv3.Config{
-		Endpoints:   p.conf.Endpoints,
-		DialTimeout: dialTimeout,
-		Username:    p.conf.Username,
-		Password:    p.conf.Password,
-	}
-
-	// Configure TLS if enabled
-	if p.conf.EnableTls {
-		tlsConfig, err := buildTLSConfig(p.conf.CertFile, p.conf.KeyFile, p.conf.CaFile)
-		if err != nil {
-			return nil, fmt.Errorf("failed to build TLS config: %w", err)
-		}
-		cfg.TLS = tlsConfig
-	}
-
-	// Create client
-	client, err := clientv3.New(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create etcd client: %w", err)
-	}
-
-	log.Infof("Etcd client initialized - Endpoints: %v, Namespace: %s",
-		p.conf.Endpoints, p.conf.Namespace)
-
-	return client, nil
 }
 
 // GetMetrics gets monitoring metrics
