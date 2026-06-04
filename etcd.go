@@ -56,6 +56,12 @@ type PlugEtcd struct {
 	// Configuration watchers — always accessed under mu.
 	configWatchers map[string]*EtcdConfigWatcher
 
+	// Service registry/discovery handles — always accessed under mu.
+	// Tracked so their background goroutines (lease keepalive, watchers) can be
+	// stopped during cleanup.
+	registrar *EtcdRegistrar
+	discovery *EtcdDiscovery
+
 	// Cache system
 	configCache map[string]any // Configuration cache
 	cacheMutex  sync.RWMutex   // Cache mutex

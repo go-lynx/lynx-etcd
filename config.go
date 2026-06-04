@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-kratos/kratos/v2/config"
@@ -63,7 +64,13 @@ func (p *PlugEtcd) NewServiceRegistry() registry.Registrar {
 		}
 	}
 
-	return NewEtcdRegistrar(p.client, registryNamespace, ttl)
+	registrar := NewEtcdRegistrar(p.client, registryNamespace, ttl)
+	// Track the registrar so its leases are revoked and keepalive goroutines are
+	// stopped during cleanup.
+	p.mu.Lock()
+	p.registrar = registrar
+	p.mu.Unlock()
+	return registrar
 }
 
 // NewServiceDiscovery implements the ServiceRegistry interface for service discovery
@@ -89,7 +96,12 @@ func (p *PlugEtcd) NewServiceDiscovery() registry.Discovery {
 		registryNamespace = conf.DefaultRegistryNamespace
 	}
 
-	return NewEtcdDiscovery(p.client, registryNamespace)
+	discovery := NewEtcdDiscovery(p.client, registryNamespace)
+	// Track the discovery handle so its watcher goroutines are stopped during cleanup.
+	p.mu.Lock()
+	p.discovery = discovery
+	p.mu.Unlock()
+	return discovery
 }
 
 // NewNodeRouter implements the RouteManager interface for service routing
@@ -116,8 +128,33 @@ func (p *PlugEtcd) GetConfig(fileName string, group string) (config.Source, erro
 
 	// Create etcd config source
 	source := NewEtcdConfigSource(p.client, prefix)
+	// Back-reference so watchers created via source.Watch() are tracked for cleanup.
+	source.plugin = p
 
 	return source, nil
+}
+
+// registerConfigWatcher tracks a config watcher under p.mu so cleanup can stop it.
+// If the plugin has already been destroyed, the watcher is stopped immediately.
+func (p *PlugEtcd) registerConfigWatcher(prefix string, watcher *EtcdConfigWatcher) {
+	if watcher == nil {
+		return
+	}
+	p.mu.Lock()
+	if atomic.LoadInt32(&p.destroyed) == 1 {
+		p.mu.Unlock()
+		_ = watcher.Stop()
+		return
+	}
+	if p.configWatchers == nil {
+		p.configWatchers = make(map[string]*EtcdConfigWatcher)
+	}
+	// Stop any prior watcher registered under the same prefix to avoid leaking it.
+	if existing, ok := p.configWatchers[prefix]; ok && existing != nil && existing != watcher {
+		_ = existing.Stop()
+	}
+	p.configWatchers[prefix] = watcher
+	p.mu.Unlock()
 }
 
 // GetConfigSources gets all configuration sources for multi-config loading
@@ -304,10 +341,11 @@ func (p *PlugEtcd) GetConfigValue(prefix, key string) (string, error) {
 	var value string
 	var lastErr error
 
+	ctx := context.Background()
 	err := p.circuitBreaker.Do(func() error {
 		if p.retryManager != nil {
 			return p.retryManager.DoWithRetry(func() error {
-				val, err := p.getConfigValueFromEtcd(prefix, key)
+				val, err := p.getConfigValueFromEtcd(ctx, prefix, key)
 				if err != nil {
 					lastErr = err
 					return err
@@ -316,7 +354,7 @@ func (p *PlugEtcd) GetConfigValue(prefix, key string) (string, error) {
 				return nil
 			})
 		}
-		val, err := p.getConfigValueFromEtcd(prefix, key)
+		val, err := p.getConfigValueFromEtcd(ctx, prefix, key)
 		if err != nil {
 			lastErr = err
 			return err
@@ -352,8 +390,10 @@ func (p *PlugEtcd) ControlPlaneCapabilities() []lynx.ControlPlaneCapability {
 	return capabilities
 }
 
-// getConfigValueFromEtcd gets configuration value from etcd client
-func (p *PlugEtcd) getConfigValueFromEtcd(prefix, key string) (string, error) {
+// getConfigValueFromEtcd gets configuration value from etcd client.
+// The caller-supplied ctx governs the etcd request; an operation timeout is
+// layered on top of it.
+func (p *PlugEtcd) getConfigValueFromEtcd(ctx context.Context, prefix, key string) (string, error) {
 	if p.client == nil {
 		return "", fmt.Errorf("etcd client not initialized")
 	}
@@ -380,11 +420,19 @@ func (p *PlugEtcd) getConfigValueFromEtcd(prefix, key string) (string, error) {
 		}
 	}
 
-	// Get from etcd
-	ctx, cancel := context.WithTimeout(context.Background(), p.conf.Timeout.AsDuration())
+	// Get from etcd. Derive the request context from the caller's ctx and apply
+	// the configured operation timeout (falling back to the default when unset).
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	timeout := conf.DefaultTimeout
+	if p.conf.Timeout != nil {
+		timeout = p.conf.Timeout.AsDuration()
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	resp, err := p.client.Get(ctx, fullKey)
+	resp, err := p.client.Get(reqCtx, fullKey)
 	if err != nil {
 		return "", err
 	}
@@ -410,6 +458,9 @@ func (p *PlugEtcd) getConfigValueFromEtcd(prefix, key string) (string, error) {
 type EtcdConfigSource struct {
 	client *clientv3.Client
 	prefix string
+	// plugin, when set, is used to register watchers created by this source into
+	// the plugin's watcher map so they are stopped during cleanup.
+	plugin *PlugEtcd
 }
 
 // NewEtcdConfigSource creates a new etcd config source
@@ -461,6 +512,10 @@ func (s *EtcdConfigSource) Watch() (config.Watcher, error) {
 
 	// Create a config watcher adapter
 	watcher := NewEtcdConfigWatcher(s.client, s.prefix)
+	// Register the watcher with the owning plugin so cleanup can stop it.
+	if s.plugin != nil {
+		s.plugin.registerConfigWatcher(s.prefix, watcher)
+	}
 	return watcher, nil
 }
 
