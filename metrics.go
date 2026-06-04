@@ -7,6 +7,10 @@ import (
 
 // Metrics defines etcd-related monitoring metrics
 type Metrics struct {
+	// registry is a private Prometheus registry so multiple plugin instances
+	// (e.g. in tests) can coexist without duplicate-registration panics.
+	registry *prometheus.Registry
+
 	// Client operation metrics
 	clientOperationsTotal    *prometheus.CounterVec
 	clientOperationsDuration *prometheus.HistogramVec
@@ -31,139 +35,132 @@ type Metrics struct {
 	cacheMissesTotal *prometheus.CounterVec
 }
 
-// NewEtcdMetrics creates new monitoring metrics instance
+// NewEtcdMetrics creates a new monitoring metrics instance backed by a private
+// prometheus.Registry so multiple instances never collide in tests.
 func NewEtcdMetrics() *Metrics {
-	return &Metrics{
-		// Client operation metrics
-		clientOperationsTotal: promauto.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: "lynx",
-				Subsystem: "etcd",
-				Name:      "client_operations_total",
-				Help:      "Total number of client operations",
-			},
-			[]string{"operation", "status"},
-		),
-		clientOperationsDuration: promauto.NewHistogramVec(
-			prometheus.HistogramOpts{
-				Namespace: "lynx",
-				Subsystem: "etcd",
-				Name:      "client_operations_duration_seconds",
-				Help:      "Duration of client operations",
-				Buckets:   prometheus.DefBuckets,
-			},
-			[]string{"operation"},
-		),
-		clientErrorsTotal: promauto.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: "lynx",
-				Subsystem: "etcd",
-				Name:      "client_errors_total",
-				Help:      "Total number of client errors",
-			},
-			[]string{"operation", "error_type"},
-		),
+	reg := prometheus.NewRegistry()
+	f := promauto.With(reg)
 
-		// Configuration management metrics
-		configOperationsTotal: promauto.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: "lynx",
-				Subsystem: "etcd",
-				Name:      "config_operations_total",
-				Help:      "Total number of configuration operations",
-			},
-			[]string{"prefix", "operation", "status"},
-		),
-		configOperationsDuration: promauto.NewHistogramVec(
-			prometheus.HistogramOpts{
-				Namespace: "lynx",
-				Subsystem: "etcd",
-				Name:      "config_operations_duration_seconds",
-				Help:      "Duration of configuration operations",
-				Buckets:   prometheus.DefBuckets,
-			},
-			[]string{"prefix", "operation"},
-		),
-		configChangesTotal: promauto.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: "lynx",
-				Subsystem: "etcd",
-				Name:      "config_changes_total",
-				Help:      "Total number of configuration changes",
-			},
-			[]string{"prefix"},
-		),
+	m := &Metrics{registry: reg}
 
-		// Health check metrics
-		healthCheckTotal: promauto.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: "lynx",
-				Subsystem: "etcd",
-				Name:      "health_check_total",
-				Help:      "Total number of health checks",
-			},
-			[]string{"status"},
-		),
-		healthCheckDuration: promauto.NewHistogramVec(
-			prometheus.HistogramOpts{
-				Namespace: "lynx",
-				Subsystem: "etcd",
-				Name:      "health_check_duration_seconds",
-				Help:      "Duration of health checks",
-				Buckets:   prometheus.DefBuckets,
-			},
-			[]string{},
-		),
-		healthCheckFailed: promauto.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: "lynx",
-				Subsystem: "etcd",
-				Name:      "health_check_failed_total",
-				Help:      "Total number of failed health checks",
-			},
-			[]string{"error_type"},
-		),
+	m.clientOperationsTotal = f.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "lynx", Subsystem: "etcd",
+			Name: "client_operations_total",
+			Help: "Total number of client operations",
+		},
+		[]string{"operation", "status"},
+	)
+	m.clientOperationsDuration = f.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "lynx", Subsystem: "etcd",
+			Name:    "client_operations_duration_seconds",
+			Help:    "Duration of client operations",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"operation"},
+	)
+	m.clientErrorsTotal = f.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "lynx", Subsystem: "etcd",
+			Name: "client_errors_total",
+			Help: "Total number of client errors",
+		},
+		[]string{"operation", "error_type"},
+	)
+	m.configOperationsTotal = f.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "lynx", Subsystem: "etcd",
+			Name: "config_operations_total",
+			Help: "Total number of configuration operations",
+		},
+		[]string{"prefix", "operation", "status"},
+	)
+	m.configOperationsDuration = f.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "lynx", Subsystem: "etcd",
+			Name:    "config_operations_duration_seconds",
+			Help:    "Duration of configuration operations",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"prefix", "operation"},
+	)
+	m.configChangesTotal = f.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "lynx", Subsystem: "etcd",
+			Name: "config_changes_total",
+			Help: "Total number of configuration changes",
+		},
+		[]string{"prefix"},
+	)
+	m.healthCheckTotal = f.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "lynx", Subsystem: "etcd",
+			Name: "health_check_total",
+			Help: "Total number of health checks",
+		},
+		[]string{"status"},
+	)
+	m.healthCheckDuration = f.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "lynx", Subsystem: "etcd",
+			Name:    "health_check_duration_seconds",
+			Help:    "Duration of health checks",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{},
+	)
+	m.healthCheckFailed = f.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "lynx", Subsystem: "etcd",
+			Name: "health_check_failed_total",
+			Help: "Total number of failed health checks",
+		},
+		[]string{"error_type"},
+	)
+	m.connectionTotal = f.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "lynx", Subsystem: "etcd",
+			Name: "connection_total",
+			Help: "Total number of connections",
+		},
+		[]string{"status"},
+	)
+	m.connectionErrorsTotal = f.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "lynx", Subsystem: "etcd",
+			Name: "connection_errors_total",
+			Help: "Total number of connection errors",
+		},
+		[]string{"error_type"},
+	)
+	m.cacheHitsTotal = f.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "lynx", Subsystem: "etcd",
+			Name: "cache_hits_total",
+			Help: "Total number of cache hits",
+		},
+		[]string{"prefix"},
+	)
+	m.cacheMissesTotal = f.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "lynx", Subsystem: "etcd",
+			Name: "cache_misses_total",
+			Help: "Total number of cache misses",
+		},
+		[]string{"prefix"},
+	)
 
-		// Connection metrics
-		connectionTotal: promauto.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Namespace: "lynx",
-				Subsystem: "etcd",
-				Name:      "connection_total",
-				Help:      "Total number of connections",
-			},
-			[]string{"status"},
-		),
-		connectionErrorsTotal: promauto.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: "lynx",
-				Subsystem: "etcd",
-				Name:      "connection_errors_total",
-				Help:      "Total number of connection errors",
-			},
-			[]string{"error_type"},
-		),
+	return m
+}
 
-		// Cache metrics
-		cacheHitsTotal: promauto.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: "lynx",
-				Subsystem: "etcd",
-				Name:      "cache_hits_total",
-				Help:      "Total number of cache hits",
-			},
-			[]string{"prefix"},
-		),
-		cacheMissesTotal: promauto.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: "lynx",
-				Subsystem: "etcd",
-				Name:      "cache_misses_total",
-				Help:      "Total number of cache misses",
-			},
-			[]string{"prefix"},
-		),
+// GetGatherer returns the Prometheus Gatherer for this metrics instance so
+// the Lynx framework can merge it into the shared /metrics endpoint.
+func (m *Metrics) GetGatherer() prometheus.Gatherer {
+	if m == nil {
+		return nil
 	}
+	return m.registry
 }
 
 // RecordClientOperation records client operation
