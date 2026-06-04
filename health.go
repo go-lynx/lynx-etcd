@@ -19,13 +19,17 @@ func (p *PlugEtcd) CheckHealth() error {
 
 // checkConfigManagementHealth checks configuration management functionality.
 func (p *PlugEtcd) checkConfigManagementHealth() error {
-	// Check status of components related to configuration management
-	if p.configWatchers == nil {
+	// Check status of components related to configuration management.
+	// Read configWatchers under mu since cleanup mutates it under the same lock.
+	p.mu.RLock()
+	watchers := p.configWatchers
+	configWatcherCount := len(watchers)
+	p.mu.RUnlock()
+
+	if watchers == nil {
 		return fmt.Errorf("config watchers not initialized")
 	}
 
-	// Check whether there are active config watchers
-	configWatcherCount := len(p.configWatchers)
 	log.Debugf("Config management health: %d active config watchers", configWatcherCount)
 
 	return nil

@@ -3,6 +3,7 @@ package etcd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -180,12 +181,24 @@ func (r *EtcdRegistrar) handleKeepAlive(instanceID string, ch <-chan *clientv3.L
 		select {
 		case resp, ok := <-ch:
 			if !ok {
-				log.Warnf("Keep-alive channel closed for instance %s", instanceID)
-				// Remove from registered map when keep-alive fails
-				r.mu.Lock()
-				delete(r.registered, instanceID)
-				r.mu.Unlock()
-				return
+				// The keep-alive channel was closed (lease expired/lost or the
+				// connection dropped). Unless the registrar is shutting down,
+				// attempt to re-register the instance so the service does not
+				// silently disappear from etcd.
+				if r.leaseCtx.Err() != nil {
+					r.mu.Lock()
+					delete(r.registered, instanceID)
+					r.mu.Unlock()
+					return
+				}
+				log.Warnf("Keep-alive channel closed for instance %s, attempting re-registration", instanceID)
+				newCh, ok := r.reRegister(instanceID)
+				if !ok {
+					// Re-registration failed or the instance is gone; stop this goroutine.
+					return
+				}
+				ch = newCh
+				continue
 			}
 			if resp != nil {
 				log.Debugf("Lease keep-alive response for instance %s: ID=%d, TTL=%d", instanceID, resp.ID, resp.TTL)
@@ -194,6 +207,83 @@ func (r *EtcdRegistrar) handleKeepAlive(instanceID string, ch <-chan *clientv3.L
 			return
 		}
 	}
+}
+
+// reRegister re-acquires a lease and re-puts the service instance after the
+// keep-alive channel for an existing registration was lost. It returns the new
+// keep-alive channel and true on success. It returns false when the instance is
+// no longer registered (e.g., deregistered concurrently) or re-registration
+// could not be completed.
+func (r *EtcdRegistrar) reRegister(instanceID string) (<-chan *clientv3.LeaseKeepAliveResponse, bool) {
+	if r.client == nil {
+		return nil, false
+	}
+
+	// Snapshot the service instance under lock; bail out if it was deregistered.
+	r.mu.RLock()
+	existing, ok := r.registered[instanceID]
+	var service *registry.ServiceInstance
+	if ok && existing != nil {
+		service = existing.instance
+	}
+	r.mu.RUnlock()
+	if service == nil {
+		return nil, false
+	}
+
+	host, port, err := parseEndpoint(service.Endpoints)
+	if err != nil {
+		log.Errorf("Failed to parse endpoint while re-registering instance %s: %v", instanceID, err)
+		return nil, false
+	}
+
+	serviceKey := buildServiceKey(r.namespace, service.Name, instanceID)
+	serviceValue, err := buildServiceValue(service, host, port)
+	if err != nil {
+		log.Errorf("Failed to build service value while re-registering instance %s: %v", instanceID, err)
+		return nil, false
+	}
+
+	ctx, cancel := context.WithTimeout(r.leaseCtx, 5*time.Second)
+	defer cancel()
+
+	lease, err := r.client.Grant(ctx, int64(r.ttl.Seconds()))
+	if err != nil {
+		log.Errorf("Failed to grant lease while re-registering instance %s: %v", instanceID, err)
+		return nil, false
+	}
+
+	if _, err := r.client.Put(ctx, serviceKey, serviceValue, clientv3.WithLease(lease.ID)); err != nil {
+		log.Errorf("Failed to re-put service while re-registering instance %s: %v", instanceID, err)
+		_, _ = r.client.Revoke(ctx, lease.ID)
+		return nil, false
+	}
+
+	// Use the long-lived leaseCtx for keep-alive so it survives the timeout above.
+	keepAliveCh, err := r.client.KeepAlive(r.leaseCtx, lease.ID)
+	if err != nil {
+		log.Errorf("Failed to keep lease alive while re-registering instance %s: %v", instanceID, err)
+		_, _ = r.client.Revoke(ctx, lease.ID)
+		return nil, false
+	}
+
+	// Update the stored registration. If the instance was deregistered in the
+	// meantime, revoke the freshly granted lease and stop.
+	r.mu.Lock()
+	current, stillRegistered := r.registered[instanceID]
+	if !stillRegistered || current == nil {
+		r.mu.Unlock()
+		_, _ = r.client.Revoke(ctx, lease.ID)
+		return nil, false
+	}
+	current.leaseID = lease.ID
+	current.keepAliveCh = keepAliveCh
+	r.mu.Unlock()
+
+	log.Infof("Re-registered service instance to etcd after lease loss - Service: %s, InstanceID: %s",
+		service.Name, instanceID)
+
+	return keepAliveCh, true
 }
 
 // Close closes the registrar and revokes all leases
@@ -303,6 +393,28 @@ func (d *EtcdDiscovery) Watch(ctx context.Context, serviceName string) (registry
 	}
 
 	return watcher, nil
+}
+
+// Close stops all watchers created by this discovery client, releasing their
+// background goroutines.
+func (d *EtcdDiscovery) Close() error {
+	d.mu.Lock()
+	watchers := d.watchers
+	d.watchers = make(map[string]*EtcdWatcher)
+	d.mu.Unlock()
+
+	var errs []error
+	for serviceName, watcher := range watchers {
+		if watcher == nil {
+			continue
+		}
+		if err := watcher.Stop(); err != nil {
+			log.Warnf("Failed to stop discovery watcher for service %s: %v", serviceName, err)
+			errs = append(errs, fmt.Errorf("stop discovery watcher %s: %w", serviceName, err))
+		}
+	}
+
+	return errors.Join(errs...)
 }
 
 // EtcdWatcher implements registry.Watcher interface

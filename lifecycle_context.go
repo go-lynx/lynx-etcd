@@ -372,6 +372,24 @@ func (p *PlugEtcd) cleanupTasksContext(ctx context.Context) error {
 	}
 	p.configWatchers = make(map[string]*EtcdConfigWatcher)
 
+	// Revoke leases and stop keepalive goroutines owned by the registrar.
+	if p.registrar != nil {
+		if err := p.registrar.Close(); err != nil {
+			log.Errorf("Failed to close etcd registrar: %v", err)
+			errs = append(errs, fmt.Errorf("close etcd registrar: %w", err))
+		}
+		p.registrar = nil
+	}
+
+	// Stop discovery watcher goroutines.
+	if p.discovery != nil {
+		if err := p.discovery.Close(); err != nil {
+			log.Errorf("Failed to close etcd discovery: %v", err)
+			errs = append(errs, fmt.Errorf("close etcd discovery: %w", err))
+		}
+		p.discovery = nil
+	}
+
 	if p.client != nil {
 		if err := p.client.Close(); err != nil {
 			log.Errorf("Failed to close etcd client: %v", err)
