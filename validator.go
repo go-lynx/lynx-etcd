@@ -8,7 +8,7 @@ import (
 	"github.com/go-lynx/lynx-etcd/conf"
 )
 
-// ValidationError configuration validation error
+// ValidationError describes a single invalid configuration field.
 type ValidationError struct {
 	Field   string
 	Message string
@@ -19,13 +19,14 @@ func (e *ValidationError) Error() string {
 	return fmt.Sprintf("validation error for field '%s': %s (value: %v)", e.Field, e.Message, e.Value)
 }
 
-// ValidationResult validation result
+// ValidationResult collects the outcome of validating a config; IsValid is false
+// once any error has been added.
 type ValidationResult struct {
 	IsValid bool
 	Errors  []*ValidationError
 }
 
-// NewValidationResult creates validation result
+// NewValidationResult returns an empty, valid result ready to accumulate errors.
 func NewValidationResult() *ValidationResult {
 	return &ValidationResult{
 		IsValid: true,
@@ -68,42 +69,32 @@ func NewValidator(config *conf.Etcd) *Validator {
 	}
 }
 
-// Validate validates configuration
+// Validate runs all configuration checks and returns the accumulated result.
 func (v *Validator) Validate() *ValidationResult {
 	result := NewValidationResult()
 
-	// Validate basic fields
 	v.validateBasicFields(result)
-
-	// Validate time-related configurations
 	v.validateTimeConfigs(result)
-
-	// Validate dependencies
 	v.validateDependencies(result)
 
 	return result
 }
 
-// validateBasicFields validates basic fields
 func (v *Validator) validateBasicFields(result *ValidationResult) {
-	// Validate endpoints (required)
 	if len(v.config.Endpoints) == 0 {
 		result.AddError("endpoints", "endpoints cannot be empty", v.config.Endpoints)
 	}
 
-	// Validate each endpoint format
 	for i, endpoint := range v.config.Endpoints {
 		if endpoint == "" {
 			result.AddError(fmt.Sprintf("endpoints[%d]", i), "endpoint cannot be empty", endpoint)
 		}
 	}
 
-	// Validate namespace
 	if v.config.Namespace != "" && len(v.config.Namespace) > 512 {
 		result.AddError("namespace", "namespace length must not exceed 512 characters", v.config.Namespace)
 	}
 
-	// Validate TLS files if TLS is enabled
 	if v.config.EnableTls {
 		if v.config.CertFile != "" && len(v.config.CertFile) > 512 {
 			result.AddError("cert_file", "cert_file path length must not exceed 512 characters", v.config.CertFile)
@@ -117,9 +108,9 @@ func (v *Validator) validateBasicFields(result *ValidationResult) {
 	}
 }
 
-// validateTimeConfigs validates time-related configurations
+// validateTimeConfigs enforces the accepted ranges for the various duration
+// fields (bounds chosen to catch obvious misconfiguration, not to be exhaustive).
 func (v *Validator) validateTimeConfigs(result *ValidationResult) {
-	// Validate timeout
 	if v.config.Timeout != nil {
 		timeout := v.config.Timeout.AsDuration()
 		if timeout < 100*time.Millisecond {
@@ -130,7 +121,6 @@ func (v *Validator) validateTimeConfigs(result *ValidationResult) {
 		}
 	}
 
-	// Validate dial_timeout
 	if v.config.DialTimeout != nil {
 		timeout := v.config.DialTimeout.AsDuration()
 		if timeout < 100*time.Millisecond {
@@ -141,7 +131,6 @@ func (v *Validator) validateTimeConfigs(result *ValidationResult) {
 		}
 	}
 
-	// Validate retry_interval
 	if v.config.RetryInterval != nil {
 		interval := v.config.RetryInterval.AsDuration()
 		if interval < 100*time.Millisecond {
@@ -152,7 +141,6 @@ func (v *Validator) validateTimeConfigs(result *ValidationResult) {
 		}
 	}
 
-	// Validate shutdown_timeout
 	if v.config.ShutdownTimeout != nil {
 		timeout := v.config.ShutdownTimeout.AsDuration()
 		if timeout < 1*time.Second {
@@ -164,9 +152,7 @@ func (v *Validator) validateTimeConfigs(result *ValidationResult) {
 	}
 }
 
-// validateDependencies validates dependencies
 func (v *Validator) validateDependencies(result *ValidationResult) {
-	// Validate max_retry_times
 	if v.config.MaxRetryTimes < 0 {
 		result.AddError("max_retry_times", "max_retry_times cannot be negative", v.config.MaxRetryTimes)
 	}

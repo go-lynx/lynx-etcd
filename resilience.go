@@ -10,24 +10,25 @@ import (
 	"github.com/go-lynx/lynx/log"
 )
 
-// RetryManager retry manager
-// Provides exponential backoff retry mechanism
+// RetryManager retries an operation with exponential backoff, capped at a
+// maximum delay (see calculateBackoff).
 type RetryManager struct {
 	maxRetries    int
 	retryInterval time.Duration
 	backoffFactor float64
 }
 
-// NewRetryManager creates new retry manager
+// NewRetryManager builds a RetryManager that retries up to maxRetries times,
+// starting from retryInterval and doubling the delay on each attempt.
 func NewRetryManager(maxRetries int, retryInterval time.Duration) *RetryManager {
 	return &RetryManager{
 		maxRetries:    maxRetries,
 		retryInterval: retryInterval,
-		backoffFactor: 2.0, // Exponential backoff factor
+		backoffFactor: 2.0,
 	}
 }
 
-// DoWithRetry executes operation with retry
+// DoWithRetry runs operation, retrying on error with backoff between attempts.
 func (r *RetryManager) DoWithRetry(operation func() error) error {
 	var lastErr error
 
@@ -40,7 +41,6 @@ func (r *RetryManager) DoWithRetry(operation func() error) error {
 		} else {
 			lastErr = err
 			if attempt < r.maxRetries {
-				// Calculate backoff time
 				backoffTime := r.calculateBackoff(attempt)
 				log.Warnf("Operation failed (attempt %d/%d): %v, retrying in %v",
 					attempt+1, r.maxRetries+1, err, backoffTime)
@@ -52,7 +52,8 @@ func (r *RetryManager) DoWithRetry(operation func() error) error {
 	return fmt.Errorf("operation failed after %d attempts, last error: %w", r.maxRetries+1, lastErr)
 }
 
-// DoWithRetryContext executes operation with retry (supports context)
+// DoWithRetryContext is DoWithRetry that also aborts as soon as ctx is cancelled,
+// both between attempts and during the backoff wait.
 func (r *RetryManager) DoWithRetryContext(ctx context.Context, operation func() error) error {
 	var lastErr error
 
@@ -87,12 +88,10 @@ func (r *RetryManager) DoWithRetryContext(ctx context.Context, operation func() 
 	return fmt.Errorf("operation failed after %d attempts, last error: %w", r.maxRetries+1, lastErr)
 }
 
-// calculateBackoff calculates backoff time
+// calculateBackoff returns retryInterval * backoffFactor^attempt, capped at 30s.
 func (r *RetryManager) calculateBackoff(attempt int) time.Duration {
-	// Exponential backoff: base * factor^attempt
 	backoffSeconds := float64(r.retryInterval) * math.Pow(r.backoffFactor, float64(attempt))
 
-	// Limit maximum backoff time to 30 seconds
 	maxBackoff := 30 * time.Second
 	if time.Duration(backoffSeconds) > maxBackoff {
 		return maxBackoff

@@ -59,54 +59,48 @@ func (r *EtcdRegistrar) Register(ctx context.Context, service *registry.ServiceI
 		return fmt.Errorf("service instance is nil")
 	}
 
-	// Parse endpoint to get host and port
 	host, port, err := parseEndpoint(service.Endpoints)
 	if err != nil {
 		return fmt.Errorf("failed to parse endpoint: %w", err)
 	}
 
-	// Build service key: namespace/serviceName/instanceID
 	instanceID := service.ID
 	if instanceID == "" {
 		instanceID = fmt.Sprintf("%s-%s-%d", service.Name, host, port)
 	}
 	serviceKey := buildServiceKey(r.namespace, service.Name, instanceID)
 
-	// Build service value (JSON format)
 	serviceValue, err := buildServiceValue(service, host, port)
 	if err != nil {
 		return fmt.Errorf("failed to build service value: %w", err)
 	}
 
-	// Grant lease
+	// Bind the key to a TTL lease and keep it alive so the instance auto-expires
+	// from etcd if this process dies without deregistering.
 	lease, err := r.client.Grant(ctx, int64(r.ttl.Seconds()))
 	if err != nil {
 		return WrapClientError(err, ErrCodeRegisterFailed, "failed to grant lease")
 	}
 
-	// Put service with lease
 	_, err = r.client.Put(ctx, serviceKey, serviceValue, clientv3.WithLease(lease.ID))
 	if err != nil {
 		return WrapClientError(err, ErrCodeRegisterFailed, "failed to register service")
 	}
 
-	// Keep lease alive
 	keepAliveCh, err := r.client.KeepAlive(r.leaseCtx, lease.ID)
 	if err != nil {
-		// If keep-alive fails, revoke the lease
+		// Don't leave a dangling lease if keepalive could not be established.
 		_, _ = r.client.Revoke(ctx, lease.ID)
 		return WrapClientError(err, ErrCodeRegisterFailed, "failed to keep lease alive")
 	}
 
-	// Check if instance already registered and revoke old lease
+	// Revoke any prior lease for this instance before overwriting its record.
 	r.mu.Lock()
 	if oldLease, exists := r.registered[instanceID]; exists {
-		// Revoke old lease
 		_, _ = r.client.Revoke(ctx, oldLease.leaseID)
 		log.Debugf("Revoked old lease for instance %s", instanceID)
 	}
 
-	// Store registration info
 	r.registered[instanceID] = &ServiceLease{
 		instance:    service,
 		leaseID:     lease.ID,
@@ -114,7 +108,6 @@ func (r *EtcdRegistrar) Register(ctx context.Context, service *registry.ServiceI
 	}
 	r.mu.Unlock()
 
-	// Start goroutine to handle keep-alive responses
 	go r.handleKeepAlive(instanceID, keepAliveCh)
 
 	log.Infof("Service instance registered to etcd - Service: %s, InstanceID: %s, Host: %s, Port: %d",
@@ -133,22 +126,20 @@ func (r *EtcdRegistrar) Deregister(ctx context.Context, service *registry.Servic
 		return fmt.Errorf("service instance is nil")
 	}
 
-	// Parse endpoint to get host and port
 	host, port, err := parseEndpoint(service.Endpoints)
 	if err != nil {
 		return fmt.Errorf("failed to parse endpoint: %w", err)
 	}
 
-	// Get instance ID
 	instanceID := service.ID
 	if instanceID == "" {
 		instanceID = fmt.Sprintf("%s-%s-%d", service.Name, host, port)
 	}
 
-	// Build service key
 	serviceKey := buildServiceKey(r.namespace, service.Name, instanceID)
 
-	// Get and revoke lease if exists
+	// Drop the local record and revoke the lease before deleting the key so the
+	// keepalive goroutine stops trying to renew it.
 	r.mu.Lock()
 	serviceLease, exists := r.registered[instanceID]
 	if exists {
@@ -163,7 +154,6 @@ func (r *EtcdRegistrar) Deregister(ctx context.Context, service *registry.Servic
 		}
 	}
 
-	// Delete service key
 	_, err = r.client.Delete(ctx, serviceKey)
 	if err != nil {
 		return WrapClientError(err, ErrCodeDeregisterFailed, "failed to deregister service")
@@ -337,10 +327,8 @@ func (d *EtcdDiscovery) GetService(ctx context.Context, serviceName string) ([]*
 		return nil, fmt.Errorf("etcd client is nil")
 	}
 
-	// Build service prefix: namespace/serviceName/
 	servicePrefix := buildServicePrefix(d.namespace, serviceName)
 
-	// Get all instances with prefix
 	resp, err := d.client.Get(ctx, servicePrefix, clientv3.WithPrefix())
 	if err != nil {
 		return nil, WrapClientError(err, ErrCodeDiscoveryFailed, "failed to get service instances")
@@ -365,7 +353,7 @@ func (d *EtcdDiscovery) Watch(ctx context.Context, serviceName string) (registry
 		return nil, fmt.Errorf("etcd client is nil")
 	}
 
-	// Check if watcher already exists
+	// Reuse an existing watcher for this service if one is already running.
 	d.mu.RLock()
 	if watcher, exists := d.watchers[serviceName]; exists {
 		d.mu.RUnlock()
@@ -373,18 +361,13 @@ func (d *EtcdDiscovery) Watch(ctx context.Context, serviceName string) (registry
 	}
 	d.mu.RUnlock()
 
-	// Build service prefix
 	servicePrefix := buildServicePrefix(d.namespace, serviceName)
-
-	// Create new watcher
 	watcher := NewEtcdWatcher(d.client, servicePrefix, serviceName)
 
-	// Store watcher
 	d.mu.Lock()
 	d.watchers[serviceName] = watcher
 	d.mu.Unlock()
 
-	// Start watching
 	if err := watcher.Start(ctx); err != nil {
 		d.mu.Lock()
 		delete(d.watchers, serviceName)
@@ -452,10 +435,8 @@ func (w *EtcdWatcher) Start(ctx context.Context) error {
 	w.running = true
 	w.mu.Unlock()
 
-	// Start watching
 	w.watchCh = w.client.Watch(ctx, w.servicePrefix, clientv3.WithPrefix())
 
-	// Start background goroutine to handle watch events
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -465,7 +446,7 @@ func (w *EtcdWatcher) Start(ctx context.Context) error {
 		w.handleWatchEvents(ctx)
 	}()
 
-	// Start background goroutine to handle context cancellation
+	// Stop the watcher when the caller's context is cancelled.
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -492,12 +473,10 @@ func (w *EtcdWatcher) handleWatchEvents(ctx context.Context) {
 				continue
 			}
 
-			// Convert events to service instances
 			var instances []*registry.ServiceInstance
 			for _, event := range resp.Events {
 				switch event.Type {
 				case clientv3.EventTypePut:
-					// Service instance added or updated
 					instance, err := parseServiceValue(event.Kv.Value, w.serviceName)
 					if err != nil {
 						log.Warnf("Failed to parse service value: %v", err)
@@ -505,8 +484,8 @@ func (w *EtcdWatcher) handleWatchEvents(ctx context.Context) {
 					}
 					instances = append(instances, instance)
 				case clientv3.EventTypeDelete:
-					// Service instance deleted
-					// Extract instance ID from key
+					// On delete only the key is available; recover the instance ID
+					// from its last path segment.
 					key := string(event.Kv.Key)
 					parts := strings.Split(key, "/")
 					if len(parts) > 0 {
@@ -521,7 +500,8 @@ func (w *EtcdWatcher) handleWatchEvents(ctx context.Context) {
 			}
 
 			if len(instances) > 0 {
-				// Send event (non-blocking)
+				// Non-blocking send: drop the event rather than stall the watch
+				// loop if the consumer is not keeping up.
 				select {
 				case w.eventCh <- instances:
 				case <-w.stopCh:
@@ -561,15 +541,10 @@ func (w *EtcdWatcher) Stop() error {
 		return nil
 	}
 
-	// Use sync.Once to ensure channels are closed only once
+	// stopOnce guards the channel closes against concurrent Stop calls.
 	w.stopOnce.Do(func() {
-		// Mark as closed atomically
 		atomic.StoreInt32(&w.closed, 1)
-
-		// Close stop channel
 		close(w.stopCh)
-
-		// Close event channel
 		close(w.eventCh)
 	})
 
@@ -586,13 +561,11 @@ func parseEndpoint(endpoints []string) (string, int, error) {
 
 	endpoint := endpoints[0]
 
-	// Remove protocol prefix
 	endpoint = strings.TrimPrefix(endpoint, "http://")
 	endpoint = strings.TrimPrefix(endpoint, "https://")
 	endpoint = strings.TrimPrefix(endpoint, "grpc://")
 	endpoint = strings.TrimPrefix(endpoint, "grpcs://")
 
-	// Parse host and port
 	parts := strings.Split(endpoint, ":")
 	if len(parts) != 2 {
 		return "", 0, fmt.Errorf("invalid endpoint format: %s", endpoints[0])

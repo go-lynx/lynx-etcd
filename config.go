@@ -18,21 +18,21 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
-// HTTPRateLimit implements the RateLimiter interface for HTTP rate limiting
-// Etcd is a configuration center, not a rate limiting service, so this returns nil
+// HTTPRateLimit satisfies the RateLimiter interface but always returns nil:
+// etcd is a configuration centre, not a rate-limiting service.
 func (p *PlugEtcd) HTTPRateLimit() middleware.Middleware {
 	log.Debugf("Etcd plugin does not support HTTP rate limiting, returning nil")
 	return nil
 }
 
-// GRPCRateLimit implements the RateLimiter interface for gRPC rate limiting
-// Etcd is a configuration center, not a rate limiting service, so this returns nil
+// GRPCRateLimit satisfies the RateLimiter interface but always returns nil.
 func (p *PlugEtcd) GRPCRateLimit() middleware.Middleware {
 	log.Debugf("Etcd plugin does not support gRPC rate limiting, returning nil")
 	return nil
 }
 
-// NewServiceRegistry implements the ServiceRegistry interface for service registration
+// NewServiceRegistry returns an etcd-backed Registrar, or nil if registration is
+// disabled or the plugin is not ready. The lease TTL defaults to DefaultTTL.
 func (p *PlugEtcd) NewServiceRegistry() registry.Registrar {
 	if err := p.checkInitialized(); err != nil {
 		log.Warnf("Etcd plugin not initialized, returning nil registrar: %v", err)
@@ -49,13 +49,11 @@ func (p *PlugEtcd) NewServiceRegistry() registry.Registrar {
 		return nil
 	}
 
-	// Get registry namespace
 	registryNamespace := p.conf.RegistryNamespace
 	if registryNamespace == "" {
 		registryNamespace = conf.DefaultRegistryNamespace
 	}
 
-	// Get TTL
 	ttl := conf.DefaultTTL
 	if p.conf.Ttl != nil {
 		ttl = p.conf.Ttl.AsDuration()
@@ -73,7 +71,8 @@ func (p *PlugEtcd) NewServiceRegistry() registry.Registrar {
 	return registrar
 }
 
-// NewServiceDiscovery implements the ServiceRegistry interface for service discovery
+// NewServiceDiscovery returns an etcd-backed Discovery, or nil if discovery is
+// disabled or the plugin is not ready.
 func (p *PlugEtcd) NewServiceDiscovery() registry.Discovery {
 	if err := p.checkInitialized(); err != nil {
 		log.Warnf("Etcd plugin not initialized, returning nil discovery: %v", err)
@@ -90,12 +89,10 @@ func (p *PlugEtcd) NewServiceDiscovery() registry.Discovery {
 		return nil
 	}
 
-	// Get registry namespace
 	registryNamespace := p.conf.RegistryNamespace
 	if registryNamespace == "" {
 		registryNamespace = conf.DefaultRegistryNamespace
 	}
-
 	discovery := NewEtcdDiscovery(p.client, registryNamespace)
 	// Track the discovery handle so its watcher goroutines are stopped during cleanup.
 	p.mu.Lock()
@@ -104,21 +101,20 @@ func (p *PlugEtcd) NewServiceDiscovery() registry.Discovery {
 	return discovery
 }
 
-// NewNodeRouter implements the RouteManager interface for service routing
-// Etcd is a configuration center, not a routing service, so this returns nil
+// NewNodeRouter satisfies the RouteManager interface but always returns nil:
+// etcd does not provide routing.
 func (p *PlugEtcd) NewNodeRouter(serviceName string) selector.NodeFilter {
 	log.Debugf("Etcd plugin does not support service routing, returning nil for service: %s", serviceName)
 	return nil
 }
 
-// GetConfig gets configuration from etcd configuration center
-// This method retrieves the corresponding configuration source from etcd based on the provided prefix
+// GetConfig returns a config.Source for the given key prefix. fileName is treated
+// as the etcd key prefix; an empty prefix falls back to the configured namespace.
 func (p *PlugEtcd) GetConfig(fileName string, group string) (config.Source, error) {
 	if err := p.checkInitialized(); err != nil {
 		return nil, err
 	}
 
-	// For etcd, fileName is treated as key prefix
 	prefix := fileName
 	if prefix == "" {
 		prefix = p.conf.Namespace
@@ -157,8 +153,8 @@ func (p *PlugEtcd) registerConfigWatcher(prefix string, watcher *EtcdConfigWatch
 	p.mu.Unlock()
 }
 
-// GetConfigSources gets all configuration sources for multi-config loading
-// This method implements the MultiConfigControlPlane interface
+// GetConfigSources returns the main config source plus any additional prefixes,
+// implementing the MultiConfigControlPlane interface.
 func (p *PlugEtcd) GetConfigSources() ([]config.Source, error) {
 	if err := p.checkInitialized(); err != nil {
 		return nil, err
@@ -166,7 +162,6 @@ func (p *PlugEtcd) GetConfigSources() ([]config.Source, error) {
 
 	var sources []config.Source
 
-	// Get main configuration source
 	mainSource, err := p.getMainConfigSource()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get main config source: %w", err)
@@ -175,7 +170,6 @@ func (p *PlugEtcd) GetConfigSources() ([]config.Source, error) {
 		sources = append(sources, mainSource)
 	}
 
-	// Get additional configuration sources
 	additionalSources, err := p.getAdditionalConfigSources()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get additional config sources: %w", err)
@@ -257,10 +251,10 @@ func (p *PlugEtcd) WatchControlPlaneConfig(ctx context.Context, target lynx.Cont
 	return watcher, nil
 }
 
-// getMainConfigSource gets the main configuration source based on service_config
+// getMainConfigSource resolves the primary prefix from service_config (falling
+// back to the namespace) and returns its config source.
 func (p *PlugEtcd) getMainConfigSource() (config.Source, error) {
 	if p.conf.ServiceConfig == nil {
-		// Fallback to default behavior if service_config is not configured
 		prefix := p.conf.Namespace
 		if prefix == "" {
 			prefix = conf.DefaultNamespace
@@ -271,10 +265,8 @@ func (p *PlugEtcd) getMainConfigSource() (config.Source, error) {
 		return p.GetConfig(prefix, "")
 	}
 
-	// Use service_config configuration
 	serviceConfig := p.conf.ServiceConfig
 
-	// Determine prefix
 	prefix := serviceConfig.Prefix
 	if prefix == "" {
 		prefix = p.conf.Namespace
@@ -285,7 +277,8 @@ func (p *PlugEtcd) getMainConfigSource() (config.Source, error) {
 	return p.GetConfig(prefix, "")
 }
 
-// getAdditionalConfigSources gets additional configuration sources
+// getAdditionalConfigSources returns config sources for each additional prefix
+// declared in service_config, if any.
 func (p *PlugEtcd) getAdditionalConfigSources() ([]config.Source, error) {
 	if p.conf.ServiceConfig == nil || len(p.conf.ServiceConfig.AdditionalPrefixes) == 0 {
 		return nil, nil
@@ -295,7 +288,6 @@ func (p *PlugEtcd) getAdditionalConfigSources() ([]config.Source, error) {
 
 	var sources []config.Source
 	for _, prefix := range serviceConfig.AdditionalPrefixes {
-		// Use service_config prefix as default if not specified
 		if prefix == "" {
 			prefix = serviceConfig.Prefix
 		}
@@ -319,13 +311,13 @@ func (p *PlugEtcd) getAdditionalConfigSources() ([]config.Source, error) {
 	return sources, nil
 }
 
-// GetConfigValue gets configuration value from etcd
+// GetConfigValue reads a single value, guarded by the circuit breaker and (when
+// enabled) the retry manager. The cache is consulted first.
 func (p *PlugEtcd) GetConfigValue(prefix, key string) (string, error) {
 	if err := p.checkInitialized(); err != nil {
 		return "", err
 	}
 
-	// Record configuration operation metrics
 	if p.metrics != nil {
 		p.metrics.RecordConfigOperation(prefix, "get", "start")
 		defer func() {
@@ -337,7 +329,6 @@ func (p *PlugEtcd) GetConfigValue(prefix, key string) (string, error) {
 
 	log.Infof("Getting config value - Prefix: [%s], Key: [%s]", prefix, key)
 
-	// Execute with circuit breaker and retry mechanism
 	var value string
 	var lastErr error
 
@@ -398,10 +389,8 @@ func (p *PlugEtcd) getConfigValueFromEtcd(ctx context.Context, prefix, key strin
 		return "", fmt.Errorf("etcd client not initialized")
 	}
 
-	// Build full key path
 	fullKey := buildKey(prefix, key)
 
-	// Check cache first if enabled
 	if p.conf.EnableCache {
 		cacheKey := fmt.Sprintf("%s:%s", prefix, key)
 		p.cacheMutex.RLock()
@@ -480,7 +469,6 @@ func (s *EtcdConfigSource) Load() ([]*config.KeyValue, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Get all keys with prefix
 	resp, err := s.client.Get(ctx, s.prefix, clientv3.WithPrefix())
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config from etcd: %w", err)
@@ -488,11 +476,9 @@ func (s *EtcdConfigSource) Load() ([]*config.KeyValue, error) {
 
 	var kvs []*config.KeyValue
 	for _, kv := range resp.Kvs {
-		// Extract key name (remove prefix)
+		// Strip the prefix and map etcd's path separators to dotted config keys.
 		key := strings.TrimPrefix(string(kv.Key), s.prefix)
 		key = strings.TrimPrefix(key, "/")
-
-		// Convert etcd key path to config key (replace / with .)
 		key = strings.ReplaceAll(key, "/", ".")
 
 		kvs = append(kvs, &config.KeyValue{
