@@ -18,7 +18,7 @@ import (
 
 const (
 	pluginName        = "etcd.config.center"
-	pluginVersion     = "v1.6.1"
+	pluginVersion     = "v1.6.3"
 	pluginDescription = "etcd configuration center plugin for lynx framework"
 	// confPrefix is the config subtree this plugin reads its settings from.
 	confPrefix = "lynx.etcd"
