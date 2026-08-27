@@ -11,89 +11,26 @@ import (
 	"github.com/go-lynx/lynx"
 	"github.com/go-lynx/lynx-etcd/conf"
 	"github.com/go-lynx/lynx/log"
-	"github.com/go-lynx/lynx/plugins"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
+// IsContextAware asserts that the plugin's lifecycle genuinely observes context
+// cancellation: the core BasePlugin drives StartContext/StopContext and routes
+// into the context-aware step hooks below.
 func (p *PlugEtcd) IsContextAware() bool {
 	return true
 }
 
-func (p *PlugEtcd) InitializeContext(ctx context.Context, plugin plugins.Plugin, rt plugins.Runtime) error {
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("initialize canceled before start: %w", err)
-	}
-	return p.BasePlugin.Initialize(plugin, rt)
+// StartupTasksContext is the context-aware startup hook. The core BasePlugin
+// drives the lifecycle state machine (status transitions, events, health check)
+// and passes the caller's context straight through so cancellation is real.
+func (p *PlugEtcd) StartupTasksContext(ctx context.Context) error {
+	return p.startupTasksContext(ctx)
 }
 
-func (p *PlugEtcd) StartContext(ctx context.Context, plugin plugins.Plugin) error {
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("start canceled before execution: %w", err)
-	}
-	if p.Status(plugin) == plugins.StatusActive {
-		return plugins.ErrPluginAlreadyActive
-	}
-
-	p.SetStatus(plugins.StatusInitializing)
-	p.EmitEvent(plugins.PluginEvent{
-		Type:     plugins.EventPluginStarting,
-		Priority: plugins.PriorityNormal,
-		Source:   "StartContext",
-		Category: "lifecycle",
-	})
-
-	if err := p.startupTasksContext(ctx); err != nil {
-		p.SetStatus(plugins.StatusFailed)
-		return plugins.NewPluginError(p.ID(), "Start", "Failed to perform startup tasks", err)
-	}
-
-	if err := p.checkEtcdHealthContext(ctx); err != nil {
-		p.SetStatus(plugins.StatusFailed)
-		log.Errorf("Plugin %s health check failed: %v", plugin.Name(), err)
-		return fmt.Errorf("plugin %s health check failed: %w", plugin.Name(), err)
-	}
-
-	p.SetStatus(plugins.StatusActive)
-	p.EmitEvent(plugins.PluginEvent{
-		Type:     plugins.EventPluginStarted,
-		Priority: plugins.PriorityNormal,
-		Source:   "StartContext",
-		Category: "lifecycle",
-	})
-
-	return nil
-}
-
-func (p *PlugEtcd) StopContext(ctx context.Context, plugin plugins.Plugin) error {
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("stop canceled before execution: %w", err)
-	}
-	if p.Status(plugin) != plugins.StatusActive {
-		return plugins.NewPluginError(p.ID(), "Stop", "Plugin must be active to stop", plugins.ErrPluginNotActive)
-	}
-
-	p.SetStatus(plugins.StatusStopping)
-	p.EmitEvent(plugins.PluginEvent{
-		Type:     plugins.EventPluginStopping,
-		Priority: plugins.PriorityNormal,
-		Source:   "StopContext",
-		Category: "lifecycle",
-	})
-
-	if err := p.cleanupTasksContext(ctx); err != nil {
-		p.SetStatus(plugins.StatusFailed)
-		return plugins.NewPluginError(p.ID(), "Stop", "Failed to perform cleanup tasks", err)
-	}
-
-	p.SetStatus(plugins.StatusTerminated)
-	p.EmitEvent(plugins.PluginEvent{
-		Type:     plugins.EventPluginStopped,
-		Priority: plugins.PriorityNormal,
-		Source:   "StopContext",
-		Category: "lifecycle",
-	})
-
-	return nil
+// CleanupTasksContext is the context-aware cleanup hook driven by the core BasePlugin.
+func (p *PlugEtcd) CleanupTasksContext(ctx context.Context) error {
+	return p.cleanupTasksContext(ctx)
 }
 
 func (p *PlugEtcd) startupTasksContext(ctx context.Context) (startErr error) {

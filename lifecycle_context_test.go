@@ -9,7 +9,7 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
-func TestPlugEtcd_StartContext_ReturnsConnectivityError(t *testing.T) {
+func TestPlugEtcd_StartupTasksContext_ReturnsConnectivityError(t *testing.T) {
 	p := NewEtcdConfigCenter()
 	p.conf = &conf.Etcd{
 		Endpoints:   []string{"127.0.0.1:1"},
@@ -27,7 +27,7 @@ func TestPlugEtcd_StartContext_ReturnsConnectivityError(t *testing.T) {
 	defer cancel()
 
 	start := time.Now()
-	err := p.StartContext(ctx, p)
+	err := p.StartupTasksContext(ctx)
 	if err == nil {
 		t.Fatal("expected error when etcd endpoint is unreachable, got nil")
 	}
